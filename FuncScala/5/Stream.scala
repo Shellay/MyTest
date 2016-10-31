@@ -22,11 +22,17 @@ sealed trait Stream[+A] {
     case Cons(hlz, tlz) => if (n == 0) Empty else Cons(hlz, () => tlz().take(n - 1))
   }
 
+  def exists(p: A => Boolean): Boolean =
+    foldRight(false)(p(_) || _)
+
   def forAll(p: A => Boolean): Boolean =
     foldRight(true)(p(_) && _)
 
   def takeWhile(p: A => Boolean): Stream[A] =
     foldRight[Stream[A]](Empty)((a, as) => if (p(a)) Cons(()=>a, ()=>as) else Empty)
+
+  // def dropWhile(p: A => Boolean): Stream[A] =
+  //   foldRight[Stream[A]](Empty)((a, as) => if (p(a)) as else Cons(()=>a, ()=>as))
 
   def headOption: Option[A] =
     foldRight[Option[A]](None)((h, _) => Some(h))
@@ -47,7 +53,6 @@ sealed trait Stream[+A] {
     filter(p).headOption
 
 }
-
 
 case object Empty extends Stream[Nothing]
 case class Cons[+A](h: () => A, t: () => Stream[A]) extends Stream[A]
@@ -127,12 +132,79 @@ object Main {
       case (Cons(a, aa), Cons(b, bb)) => Some( ((Some(a()), Some(b())), (aa(), bb())) )
     })
 
+  def startsWith[A](xs: Stream[A], ys: Stream[A]): Boolean = {
+    zipAll(xs, ys).takeWhile(
+      _ match {
+        case (Some(x), Some(y)) => true
+        case _ => false
+      }
+    ).forAll(
+      xy => xy._1 == xy._2
+    )
+  }
+
+  def tails[A](as: Stream[A]): Stream[Stream[A]] =
+    unfold[Stream[A]/*value*/, Stream[A]/*state*/](as)(
+      _ match {
+        case Empty => None
+        case Cons(h, t) => Some( (Cons(h, t), t()) )
+      }
+    )
+
+  def hasSubsequence[A](a: Stream[A], b: Stream[A]): Boolean =
+    tails(a) exists (startsWith(_, b))
+
+  /*
+  def scanRight[A, B](as: Stream[A])(b: B)(f: (A, => B) => B): Stream[B] =
+    unfold[B, Stream[A]](as)({
+      _ match {
+        case Empty => None
+        case Cons(h, t) => Some(
+          (Cons(h, t).foldRight(b)(f), t()) // O(n2) time!
+            /* Using `unfold` may not be able to achieve O(n) since during
+             state A transfering the by-result B cannot be created without
+             knowing further tails.
+             Analogue to using `foldLeft` to implement `concat`:
+
+             concat :: [[a]] -> [a]
+             concat xss = foldLeft append [] xss    -- ((([] ++ xs1) ++ xs2) ++ ...)
+
+             In contrast, using `foldRight` guarantees O(n):
+             concat xss = foldRight append [] xss    -- (xs1 ++ (xs2 ++ ... (xsN ++ [])))
+             since the tail is retrieved before it is used for construction.
+             */
+        )
+      }
+    })
+
+  def scanRight[A, B](as: Stream[A])(b: B)(f: (A, => B) => B): Stream[B] = {
+    as match {
+      case Empty => Cons(()=>b, ()=>Empty)
+      case Cons(h, t) => Cons(()=>as.foldRight(b)(f), ()=>scanRight(t())(b)(f))
+    }
+  }
+   */
+
+  def scanRight[A, B](as: Stream[A])(b: B)(f: (A, => B) => B): Stream[B] = {
+    as match {
+      case Empty => Cons(()=>b, ()=>Empty)
+      case Cons(ah, at) => {
+        lazy val bss = scanRight(at())(b)(f)
+        bss match {
+          case Cons(b1, _) => Cons(()=>f(ah(), b1()), ()=>bss)
+          case _ => Empty
+        }
+      }
+    }
+  }
+
   def main(argv: Array[String]) = {
-    // println(ones.take(5).toList)
-    // println(fib.take(15).toList)
-    // println(mapUF(fib.take(15))(_ * 10).toList)
-    println(takeUF(mapUF(fib)(_ * 10))(15).toList)
-    println(takeWhileUF(mapUF(fib)(_ * 10))(_ < 10000).toList)
+    val o11: Stream[Int] = Cons[Int](()=>1, ()=>Cons[Int](()=>1, ()=>Empty))
+    val o12: Stream[Int] = Cons[Int](()=>1, ()=>Cons[Int](()=>2, ()=>Cons(()=>3, ()=>Empty)))
+    println(startsWith(ones, o11))
+    println(startsWith(ones, o12))
+    println(tails(o12).map(_.toList).toList)
+    println(scanRight(o12)(0)(_ + _).toList)
   }
 
 }
